@@ -82,7 +82,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
     });
 
     final endTime = DateTime.now();
-    final startTime = endTime.subtract(Duration(days: _rangeDays));
+    final startTime = _rangeStart(endTime);
     final types = _iosHealthDataTypes
         .where(_health.isDataTypeAvailable)
         .toList();
@@ -179,6 +179,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
                       isLoading: _isLoading,
                       authorized: _authorized,
                       rangeDays: _rangeDays,
+                      rangeLabel: _rangeLabel(DateTime.now()),
                       dataTypes: visibleResults.length,
                       totalPoints: totalPoints,
                       failedTypes: failedTypes,
@@ -223,6 +224,22 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
       ),
     );
   }
+
+  DateTime _rangeStart(DateTime endTime) {
+    final today = DateTime(endTime.year, endTime.month, endTime.day);
+    if (_rangeDays == 1) {
+      return today;
+    }
+    return today.subtract(Duration(days: _rangeDays - 1));
+  }
+
+  String _rangeLabel(DateTime endTime) {
+    final start = _rangeStart(endTime);
+    if (_rangeDays == 1) {
+      return 'Hôm nay từ ${start.hour.twoDigits}:${start.minute.twoDigits}';
+    }
+    return '${start.shortDate} - ${endTime.shortDate}';
+  }
 }
 
 class _HealthHeader extends StatelessWidget {
@@ -230,6 +247,7 @@ class _HealthHeader extends StatelessWidget {
     required this.isLoading,
     required this.authorized,
     required this.rangeDays,
+    required this.rangeLabel,
     required this.dataTypes,
     required this.totalPoints,
     required this.failedTypes,
@@ -241,6 +259,7 @@ class _HealthHeader extends StatelessWidget {
   final bool isLoading;
   final bool authorized;
   final int rangeDays;
+  final String rangeLabel;
   final int dataTypes;
   final int totalPoints;
   final int failedTypes;
@@ -308,6 +327,14 @@ class _HealthHeader extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             _RangeSelector(value: rangeDays, onChanged: onRangeChanged),
+            const SizedBox(height: 10),
+            Text(
+              rangeLabel,
+              style: const TextStyle(
+                color: Color(0xFF6E6E73),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -329,6 +356,11 @@ class _HealthHeader extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Chỉ hiện các loại có bản ghi trong khoảng này. Các mục chưa có dữ liệu hoặc chưa được cấp quyền sẽ được ẩn.',
+              style: TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
             ),
             if (message != null) ...[
               const SizedBox(height: 14),
@@ -860,6 +892,11 @@ extension on DateTime {
   String get shortTime {
     final local = toLocal();
     return '${local.day.twoDigits}/${local.month.twoDigits} ${local.hour.twoDigits}:${local.minute.twoDigits}';
+  }
+
+  String get shortDate {
+    final local = toLocal();
+    return '${local.day.twoDigits}/${local.month.twoDigits}/${local.year}';
   }
 
   String get fullTime {
