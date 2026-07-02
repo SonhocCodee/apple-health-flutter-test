@@ -101,11 +101,17 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
       final results = <HealthTypeResult>[];
       for (final type in types) {
         try {
+          final queryStartTime = type.isSleepType
+              ? startTime.subtract(const Duration(hours: 18))
+              : startTime;
           final points = await _health.getHealthDataFromTypes(
             types: [type],
-            startTime: startTime,
+            startTime: queryStartTime,
             endTime: endTime,
           );
+          if (type.isSleepType) {
+            points.removeWhere((point) => !point.belongsToSleepDay(startTime));
+          }
           points.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
           results.add(HealthTypeResult(type: type, points: points));
         } catch (error) {
@@ -164,8 +170,13 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
       for (final result in _results)
         if (!_hiddenHealthDataTypes.contains(result.type)) result.type: result,
     };
+    final sleepResult = _combinedSleepResult(resultByType);
     final featuredResults = _featuredHealthDataTypes
-        .map((type) => resultByType[type] ?? HealthTypeResult(type: type))
+        .map(
+          (type) => type == HealthDataType.SLEEP_ASLEEP
+              ? sleepResult
+              : resultByType[type] ?? HealthTypeResult(type: type),
+        )
         .toList();
     final totalPoints = visibleResults.fold<int>(
       0,
@@ -292,6 +303,19 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
       _selectedDate = pickedDate.dateOnly;
     });
     _loadHealthData();
+  }
+
+  HealthTypeResult _combinedSleepResult(
+    Map<HealthDataType, HealthTypeResult> resultByType,
+  ) {
+    final points = <HealthDataPoint>[
+      ...?resultByType[HealthDataType.SLEEP_ASLEEP]?.points,
+      ...?resultByType[HealthDataType.SLEEP_LIGHT]?.points,
+      ...?resultByType[HealthDataType.SLEEP_DEEP]?.points,
+      ...?resultByType[HealthDataType.SLEEP_REM]?.points,
+    ]..sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
+
+    return HealthTypeResult(type: HealthDataType.SLEEP_ASLEEP, points: points);
   }
 }
 
@@ -965,6 +989,11 @@ class HealthMetricStyle {
 }
 
 extension on HealthDataPoint {
+  bool belongsToSleepDay(DateTime selectedDate) {
+    return _isSameDay(dateTo, selectedDate) ||
+        _isSameDay(dateFrom, selectedDate);
+  }
+
   num get numericValue {
     if (value is NumericHealthValue) {
       return (value as NumericHealthValue).numericValue;
@@ -1091,6 +1120,19 @@ bool _isSameDay(DateTime a, DateTime b) {
 }
 
 extension on HealthDataType {
+  bool get isSleepType {
+    return switch (this) {
+      HealthDataType.SLEEP_AWAKE ||
+      HealthDataType.SLEEP_ASLEEP ||
+      HealthDataType.SLEEP_IN_BED ||
+      HealthDataType.SLEEP_LIGHT ||
+      HealthDataType.SLEEP_DEEP ||
+      HealthDataType.SLEEP_REM ||
+      HealthDataType.SLEEP_WRIST_TEMPERATURE => true,
+      _ => false,
+    };
+  }
+
   bool get shouldSumSamples {
     return switch (this) {
       HealthDataType.STEPS ||
@@ -1099,6 +1141,11 @@ extension on HealthDataType {
       HealthDataType.DISTANCE_WALKING_RUNNING ||
       HealthDataType.EXERCISE_TIME ||
       HealthDataType.SLEEP_ASLEEP ||
+      HealthDataType.SLEEP_AWAKE ||
+      HealthDataType.SLEEP_IN_BED ||
+      HealthDataType.SLEEP_LIGHT ||
+      HealthDataType.SLEEP_DEEP ||
+      HealthDataType.SLEEP_REM ||
       HealthDataType.APPLE_STAND_TIME ||
       HealthDataType.APPLE_MOVE_TIME ||
       HealthDataType.WATER ||
@@ -1114,7 +1161,12 @@ extension on HealthDataType {
 
   bool get prefersDurationLabel {
     return switch (this) {
-      HealthDataType.SLEEP_ASLEEP => true,
+      HealthDataType.SLEEP_ASLEEP ||
+      HealthDataType.SLEEP_AWAKE ||
+      HealthDataType.SLEEP_IN_BED ||
+      HealthDataType.SLEEP_LIGHT ||
+      HealthDataType.SLEEP_DEEP ||
+      HealthDataType.SLEEP_REM => true,
       _ => false,
     };
   }
@@ -1324,7 +1376,7 @@ const List<HealthDataType> _featuredHealthDataTypes = [
   HealthDataType.STEPS,
   HealthDataType.ACTIVE_ENERGY_BURNED,
   HealthDataType.DISTANCE_WALKING_RUNNING,
-  HealthDataType.EXERCISE_TIME,
+  HealthDataType.BLOOD_OXYGEN,
   HealthDataType.SLEEP_ASLEEP,
   HealthDataType.HEART_RATE,
 ];
