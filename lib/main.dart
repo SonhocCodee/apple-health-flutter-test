@@ -91,7 +91,8 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
               .add(const Duration(days: 1))
               .subtract(const Duration(milliseconds: 1));
     final types = _iosHealthDataTypes
-        .where(_health.isDataTypeAvailable)
+        .where((type) => _health.isDataTypeAvailable(type))
+        .where((type) => !_hiddenHealthDataTypes.contains(type))
         .toList();
 
     try {
@@ -156,11 +157,15 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final visibleResults = _results
+        .where((result) => !_hiddenHealthDataTypes.contains(result.type))
         .where((result) => result.points.isNotEmpty)
         .toList();
-    final featuredResults = visibleResults
-        .where((result) => result.type.priority < 100)
-        .take(6)
+    final resultByType = {
+      for (final result in _results)
+        if (!_hiddenHealthDataTypes.contains(result.type)) result.type: result,
+    };
+    final featuredResults = _featuredHealthDataTypes
+        .map((type) => resultByType[type] ?? HealthTypeResult(type: type))
         .toList();
     final totalPoints = visibleResults.fold<int>(
       0,
@@ -209,27 +214,29 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
                     const SizedBox(height: 18),
                     if (_isLoading && visibleResults.isEmpty)
                       const _LoadingState()
-                    else if (visibleResults.isEmpty)
-                      const _EmptyState()
                     else ...[
                       _SectionTitle(
                         title: 'Ưu tiên',
-                        subtitle: 'Những chỉ số thường cần xem nhanh',
+                        subtitle: '6 chỉ số chính trong ngày đã chọn',
                       ),
                       const SizedBox(height: 10),
                       _FeaturedGrid(results: featuredResults),
                       const SizedBox(height: 22),
-                      _SectionTitle(
-                        title: 'Tất cả dữ liệu',
-                        subtitle: '${visibleResults.length} loại có dữ liệu',
-                      ),
-                      const SizedBox(height: 10),
-                      ...visibleResults.map(
-                        (result) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: HealthTypeCard(result: result),
+                      if (visibleResults.isEmpty)
+                        const _EmptyState()
+                      else ...[
+                        _SectionTitle(
+                          title: 'Tất cả dữ liệu',
+                          subtitle: '${visibleResults.length} loại có dữ liệu',
                         ),
-                      ),
+                        const SizedBox(height: 10),
+                        ...visibleResults.map(
+                          (result) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: HealthTypeCard(result: result),
+                          ),
+                        ),
+                      ],
                     ],
                   ]),
                 ),
@@ -551,12 +558,6 @@ class _FeaturedGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (results.isEmpty) {
-      return const _EmptyCard(
-        text: 'Chưa có chỉ số ưu tiên trong khoảng thời gian này.',
-      );
-    }
-
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth > 560 ? 3 : 2;
@@ -587,7 +588,7 @@ class _FeaturedMetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = result.type.style;
-    if (result.latest == null) return const SizedBox.shrink();
+    final hasData = result.latest != null;
 
     return Card(
       child: Padding(
@@ -614,11 +615,11 @@ class _FeaturedMetricCard extends StatelessWidget {
             ),
             const Spacer(),
             Text(
-              result.displayValue,
+              hasData ? result.displayValue : '-',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: style.color,
+                color: hasData ? style.color : const Color(0xFF8E8E93),
                 fontSize: 30,
                 height: 1,
                 fontWeight: FontWeight.w800,
@@ -626,14 +627,16 @@ class _FeaturedMetricCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              result.unitLabel,
+              hasData && result.unitLabel.isNotEmpty
+                  ? result.unitLabel
+                  : 'Chưa có dữ liệu',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xFF6E6E73)),
             ),
             const SizedBox(height: 8),
             Text(
-              result.caption,
+              hasData ? result.caption : 'Ngày đã chọn',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12),
@@ -1316,3 +1319,17 @@ const List<HealthDataType> _iosHealthDataTypes = [
   HealthDataType.UV_INDEX,
   HealthDataType.SLEEP_WRIST_TEMPERATURE,
 ];
+
+const List<HealthDataType> _featuredHealthDataTypes = [
+  HealthDataType.STEPS,
+  HealthDataType.ACTIVE_ENERGY_BURNED,
+  HealthDataType.DISTANCE_WALKING_RUNNING,
+  HealthDataType.EXERCISE_TIME,
+  HealthDataType.SLEEP_ASLEEP,
+  HealthDataType.HEART_RATE,
+];
+
+const Set<HealthDataType> _hiddenHealthDataTypes = {
+  HealthDataType.BIRTH_DATE,
+  HealthDataType.FLIGHTS_CLIMBED,
+};
