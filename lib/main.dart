@@ -179,11 +179,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
         )
         .toList();
     final groupedResults = _groupVisibleResults(visibleResults);
-    final totalPoints = visibleResults.fold<int>(
-      0,
-      (sum, result) => sum + result.points.length,
-    );
-    final failedTypes = _results.where((result) => result.error != null).length;
+    final profileMetrics = _buildProfileMetrics(resultByType);
 
     return Scaffold(
       appBar: AppBar(
@@ -214,9 +210,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
                       isLoading: _isLoading,
                       authorized: _authorized,
                       selectedDate: _selectedDate,
-                      dataTypes: visibleResults.length,
-                      totalPoints: totalPoints,
-                      failedTypes: failedTypes,
+                      profileMetrics: profileMetrics,
                       lastUpdated: _lastUpdated,
                       message: _message,
                       onPreviousDay: _goToPreviousDay,
@@ -342,6 +336,56 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
     groupedResults.removeWhere((_, results) => results.isEmpty);
     return groupedResults;
   }
+
+  List<ProfileMetric> _buildProfileMetrics(
+    Map<HealthDataType, HealthTypeResult> resultByType,
+  ) {
+    final height = resultByType[HealthDataType.HEIGHT];
+    final weight = resultByType[HealthDataType.WEIGHT];
+    final bmi = resultByType[HealthDataType.BODY_MASS_INDEX];
+
+    return [
+      ProfileMetric(
+        label: 'Chiều cao',
+        value: height?.displayValue ?? '-',
+        unit: height?.unitLabel ?? 'cm',
+      ),
+      ProfileMetric(
+        label: 'Cân nặng',
+        value: weight?.displayValue ?? '-',
+        unit: weight?.unitLabel ?? 'kg',
+      ),
+      ProfileMetric(
+        label: 'BMI',
+        value: _bmiValue(height, weight, bmi),
+        unit: '',
+      ),
+    ];
+  }
+
+  String _bmiValue(
+    HealthTypeResult? height,
+    HealthTypeResult? weight,
+    HealthTypeResult? bmi,
+  ) {
+    if (bmi?.latest != null) {
+      return bmi!.displayValue;
+    }
+
+    final heightPoint = height?.latest;
+    final weightPoint = weight?.latest;
+    if (heightPoint == null || weightPoint == null) {
+      return '-';
+    }
+
+    final heightMeters = heightPoint.heightInMeters;
+    final weightKg = weightPoint.weightInKg;
+    if (heightMeters <= 0 || weightKg <= 0) {
+      return '-';
+    }
+
+    return (weightKg / (heightMeters * heightMeters)).toStringAsFixed(1);
+  }
 }
 
 class _HealthHeader extends StatelessWidget {
@@ -349,9 +393,7 @@ class _HealthHeader extends StatelessWidget {
     required this.isLoading,
     required this.authorized,
     required this.selectedDate,
-    required this.dataTypes,
-    required this.totalPoints,
-    required this.failedTypes,
+    required this.profileMetrics,
     required this.lastUpdated,
     required this.message,
     required this.onPreviousDay,
@@ -362,9 +404,7 @@ class _HealthHeader extends StatelessWidget {
   final bool isLoading;
   final bool authorized;
   final DateTime selectedDate;
-  final int dataTypes;
-  final int totalPoints;
-  final int failedTypes;
+  final List<ProfileMetric> profileMetrics;
   final DateTime? lastUpdated;
   final String? message;
   final VoidCallback onPreviousDay;
@@ -439,28 +479,15 @@ class _HealthHeader extends StatelessWidget {
             const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(
-                  child: _HeaderMetric(
-                    label: 'Loại dữ liệu',
-                    value: '$dataTypes',
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _HeaderMetric(label: 'Bản ghi', value: '$totalPoints'),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _HeaderMetric(
-                    label: 'Bị ẩn lỗi',
-                    value: '$failedTypes',
-                  ),
-                ),
+                for (int index = 0; index < profileMetrics.length; index++) ...[
+                  if (index > 0) const SizedBox(width: 10),
+                  Expanded(child: _HeaderMetric(metric: profileMetrics[index])),
+                ],
               ],
             ),
             const SizedBox(height: 10),
             const Text(
-              'Chỉ hiện các loại có bản ghi trong ngày đã chọn. Các mục chưa có dữ liệu hoặc chưa được cấp quyền sẽ được ẩn.',
+              'Thông tin hồ sơ hiện lấy tạm từ Apple Health; sau này sẽ thay bằng dữ liệu API bệnh viện.',
               style: TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
             ),
             if (message != null) ...[
@@ -567,10 +594,9 @@ class _DaySelector extends StatelessWidget {
 }
 
 class _HeaderMetric extends StatelessWidget {
-  const _HeaderMetric({required this.label, required this.value});
+  const _HeaderMetric({required this.metric});
 
-  final String label;
-  final String value;
+  final ProfileMetric metric;
 
   @override
   Widget build(BuildContext context) {
@@ -583,13 +609,39 @@ class _HeaderMetric extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          FittedBox(
+            alignment: Alignment.centerLeft,
+            fit: BoxFit.scaleDown,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  metric.value,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (metric.unit.isNotEmpty) ...[
+                  const SizedBox(width: 3),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      metric.unit,
+                      style: const TextStyle(
+                        color: Color(0xFF6E6E73),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
           const SizedBox(height: 2),
           Text(
-            label,
+            metric.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
@@ -1045,6 +1097,18 @@ enum HealthCategory {
   final String title;
 }
 
+class ProfileMetric {
+  const ProfileMetric({
+    required this.label,
+    required this.value,
+    required this.unit,
+  });
+
+  final String label;
+  final String value;
+  final String unit;
+}
+
 extension on HealthDataPoint {
   bool belongsToSleepDay(DateTime selectedDate) {
     return _isSameDay(dateTo, selectedDate) ||
@@ -1056,6 +1120,27 @@ extension on HealthDataPoint {
       return (value as NumericHealthValue).numericValue;
     }
     return 0;
+  }
+
+  double get heightInMeters {
+    final value = numericValue.toDouble();
+    return switch (unit) {
+      HealthDataUnit.METER => value,
+      HealthDataUnit.CENTIMETER => value / 100,
+      HealthDataUnit.INCH => value * 0.0254,
+      HealthDataUnit.FOOT => value * 0.3048,
+      _ => 0,
+    };
+  }
+
+  double get weightInKg {
+    final value = numericValue.toDouble();
+    return switch (unit) {
+      HealthDataUnit.KILOGRAM => value,
+      HealthDataUnit.GRAM => value / 1000,
+      HealthDataUnit.POUND => value * 0.45359237,
+      _ => 0,
+    };
   }
 
   String get primaryValue {
