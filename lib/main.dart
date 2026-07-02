@@ -57,6 +57,8 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
 
   bool _isLoading = false;
   bool _authorized = false;
+  bool _configured = false;
+  bool _requestedAuthorization = false;
   DateTime _selectedDate = DateTime.now().dateOnly;
   DateTime? _lastUpdated;
   String? _message;
@@ -93,11 +95,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
         .toList();
 
     try {
-      await _health.configure();
-      _authorized = await _health.requestAuthorization(
-        types,
-        permissions: List.filled(types.length, HealthDataAccess.READ),
-      );
+      await _ensureHealthReady(types);
 
       final results = <HealthTypeResult>[];
       for (final type in types) {
@@ -138,6 +136,21 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
         });
       }
     }
+  }
+
+  Future<void> _ensureHealthReady(List<HealthDataType> types) async {
+    if (!_configured) {
+      await _health.configure();
+      _configured = true;
+    }
+
+    if (_requestedAuthorization) return;
+
+    _authorized = await _health.requestAuthorization(
+      types,
+      permissions: List.filled(types.length, HealthDataAccess.READ),
+    );
+    _requestedAuthorization = true;
   }
 
   @override
@@ -573,9 +586,8 @@ class _FeaturedMetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final latest = result.latest;
     final style = result.type.style;
-    if (latest == null) return const SizedBox.shrink();
+    if (result.latest == null) return const SizedBox.shrink();
 
     return Card(
       child: Padding(
@@ -602,7 +614,7 @@ class _FeaturedMetricCard extends StatelessWidget {
             ),
             const Spacer(),
             Text(
-              latest.primaryValue,
+              result.displayValue,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -614,14 +626,14 @@ class _FeaturedMetricCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              latest.unitLabel,
+              result.unitLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xFF6E6E73)),
             ),
             const SizedBox(height: 8),
             Text(
-              latest.dateFrom.shortTime,
+              result.caption,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12),
@@ -656,7 +668,7 @@ class HealthTypeCard extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           subtitle: Text(
-            '${latest.primaryValue} ${latest.unitLabel} · ${latest.dateFrom.shortTime}',
+            '${result.displayValue} ${result.unitLabel} · ${result.caption}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Color(0xFF6E6E73)),
@@ -666,7 +678,7 @@ class HealthTypeCard extends StatelessWidget {
             style: TextStyle(color: style.color, fontWeight: FontWeight.w800),
           ),
           children: [
-            _CleanPointDetail(point: latest),
+            _CleanPointDetail(result: result),
             if (result.points.length > 1) ...[
               const SizedBox(height: 10),
               ...result.points
@@ -704,12 +716,15 @@ class _MetricIcon extends StatelessWidget {
 }
 
 class _CleanPointDetail extends StatelessWidget {
-  const _CleanPointDetail({required this.point});
+  const _CleanPointDetail({required this.result});
 
-  final HealthDataPoint point;
+  final HealthTypeResult result;
 
   @override
   Widget build(BuildContext context) {
+    final point = result.latest;
+    if (point == null) return const SizedBox.shrink();
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -721,10 +736,15 @@ class _CleanPointDetail extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _DetailLine(
-            label: 'Giá trị',
-            value: '${point.primaryValue} ${point.unitLabel}',
+            label: result.type.shouldSumSamples ? 'Tổng' : 'Giá trị',
+            value: '${result.displayValue} ${result.unitLabel}',
           ),
-          _DetailLine(label: 'Thời gian', value: point.dateFrom.fullTime),
+          _DetailLine(
+            label: 'Thời gian',
+            value: result.type.shouldSumSamples
+                ? 'Tổng ${result.points.length} bản ghi trong ngày'
+                : point.dateFrom.fullTime,
+          ),
           if (point.sourceName.isNotEmpty)
             _DetailLine(label: 'Nguồn', value: point.sourceName),
           if (point.deviceModel != null && point.deviceModel!.isNotEmpty)
@@ -892,6 +912,40 @@ class HealthTypeResult {
   final String? error;
 
   HealthDataPoint? get latest => points.isEmpty ? null : points.first;
+
+  String get displayValue {
+    if (type.shouldSumSamples) {
+      return normalizedTotalValue.clean;
+    }
+    return latest?.primaryValue ?? '-';
+  }
+
+  String get unitLabel {
+    if (type == HealthDataType.DISTANCE_WALKING_RUNNING &&
+        latest?.unit == HealthDataUnit.METER) {
+      return 'km';
+    }
+    return latest?.unitLabel ?? '';
+  }
+
+  String get caption {
+    if (type.shouldSumSamples) {
+      return 'Tổng trong ngày';
+    }
+    return latest?.dateFrom.shortTime ?? '';
+  }
+
+  num get totalNumericValue {
+    return points.fold<num>(0, (sum, point) => sum + point.numericValue);
+  }
+
+  num get normalizedTotalValue {
+    if (type == HealthDataType.DISTANCE_WALKING_RUNNING &&
+        latest?.unit == HealthDataUnit.METER) {
+      return totalNumericValue / 1000;
+    }
+    return totalNumericValue;
+  }
 }
 
 class HealthMetricStyle {
@@ -902,9 +956,15 @@ class HealthMetricStyle {
 }
 
 extension on HealthDataPoint {
+  num get numericValue {
+    if (value is NumericHealthValue) {
+      return (value as NumericHealthValue).numericValue;
+    }
+    return 0;
+  }
+
   String get primaryValue {
     if (value is NumericHealthValue) {
-      final numericValue = (value as NumericHealthValue).numericValue;
       return numericValue.clean;
     }
 
@@ -1006,6 +1066,27 @@ bool _isSameDay(DateTime a, DateTime b) {
 }
 
 extension on HealthDataType {
+  bool get shouldSumSamples {
+    return switch (this) {
+      HealthDataType.STEPS ||
+      HealthDataType.ACTIVE_ENERGY_BURNED ||
+      HealthDataType.BASAL_ENERGY_BURNED ||
+      HealthDataType.DISTANCE_WALKING_RUNNING ||
+      HealthDataType.FLIGHTS_CLIMBED ||
+      HealthDataType.EXERCISE_TIME ||
+      HealthDataType.APPLE_STAND_TIME ||
+      HealthDataType.APPLE_MOVE_TIME ||
+      HealthDataType.WATER ||
+      HealthDataType.MINDFULNESS ||
+      HealthDataType.DIETARY_CARBS_CONSUMED ||
+      HealthDataType.DIETARY_CAFFEINE ||
+      HealthDataType.DIETARY_ENERGY_CONSUMED ||
+      HealthDataType.DIETARY_FATS_CONSUMED ||
+      HealthDataType.DIETARY_PROTEIN_CONSUMED => true,
+      _ => false,
+    };
+  }
+
   String get title {
     return switch (this) {
       HealthDataType.STEPS => 'Số bước',
