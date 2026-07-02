@@ -178,6 +178,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
               : resultByType[type] ?? HealthTypeResult(type: type),
         )
         .toList();
+    final groupedResults = _groupVisibleResults(visibleResults);
     final totalPoints = visibleResults.fold<int>(
       0,
       (sum, result) => sum + result.points.length,
@@ -237,15 +238,22 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
                         const _EmptyState()
                       else ...[
                         _SectionTitle(
-                          title: 'Tất cả dữ liệu',
+                          title: 'Danh mục',
                           subtitle: '${visibleResults.length} loại có dữ liệu',
                         ),
                         const SizedBox(height: 10),
-                        ...visibleResults.map(
-                          (result) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: HealthTypeCard(result: result),
-                          ),
+                        ...groupedResults.entries.expand(
+                          (entry) => [
+                            _CategoryHeader(title: entry.key.title),
+                            const SizedBox(height: 8),
+                            ...entry.value.map(
+                              (result) => Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: HealthTypeCard(result: result),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                         ),
                       ],
                     ],
@@ -316,6 +324,23 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
     ]..sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
 
     return HealthTypeResult(type: HealthDataType.SLEEP_ASLEEP, points: points);
+  }
+
+  Map<HealthCategory, List<HealthTypeResult>> _groupVisibleResults(
+    List<HealthTypeResult> results,
+  ) {
+    final groupedResults = {
+      HealthCategory.health: <HealthTypeResult>[],
+      HealthCategory.fitness: <HealthTypeResult>[],
+      HealthCategory.sleep: <HealthTypeResult>[],
+    };
+
+    for (final result in results) {
+      groupedResults[result.type.category]!.add(result);
+    }
+
+    groupedResults.removeWhere((_, results) => results.isEmpty);
+    return groupedResults;
   }
 }
 
@@ -613,6 +638,7 @@ class _FeaturedMetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = result.type.style;
     final hasData = result.latest != null;
+    final isDuration = result.type.prefersDurationLabel;
 
     return Card(
       child: Padding(
@@ -640,16 +666,16 @@ class _FeaturedMetricCard extends StatelessWidget {
             const Spacer(),
             Text(
               hasData ? result.displayValue : '-',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              maxLines: isDuration ? 2 : 1,
+              overflow: TextOverflow.visible,
               style: TextStyle(
                 color: hasData ? style.color : const Color(0xFF8E8E93),
-                fontSize: 30,
-                height: 1,
+                fontSize: isDuration ? 24 : 30,
+                height: isDuration ? 1.08 : 1,
                 fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: isDuration ? 2 : 4),
             Text(
               hasData && result.unitLabel.isNotEmpty
                   ? result.unitLabel
@@ -717,6 +743,27 @@ class HealthTypeCard extends StatelessWidget {
                   ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryHeader extends StatelessWidget {
+  const _CategoryHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 8, 2, 0),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Color(0xFF6E6E73),
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
@@ -988,6 +1035,16 @@ class HealthMetricStyle {
   final Color color;
 }
 
+enum HealthCategory {
+  health('Sức khỏe'),
+  fitness('Tập luyện'),
+  sleep('Ngủ');
+
+  const HealthCategory(this.title);
+
+  final String title;
+}
+
 extension on HealthDataPoint {
   bool belongsToSleepDay(DateTime selectedDate) {
     return _isSameDay(dateTo, selectedDate) ||
@@ -1120,6 +1177,27 @@ bool _isSameDay(DateTime a, DateTime b) {
 }
 
 extension on HealthDataType {
+  HealthCategory get category {
+    if (isSleepType) {
+      return HealthCategory.sleep;
+    }
+
+    return switch (this) {
+      HealthDataType.STEPS ||
+      HealthDataType.ACTIVE_ENERGY_BURNED ||
+      HealthDataType.BASAL_ENERGY_BURNED ||
+      HealthDataType.DISTANCE_WALKING_RUNNING ||
+      HealthDataType.EXERCISE_TIME ||
+      HealthDataType.WORKOUT ||
+      HealthDataType.WORKOUT_ROUTE ||
+      HealthDataType.WALKING_SPEED ||
+      HealthDataType.APPLE_STAND_TIME ||
+      HealthDataType.APPLE_STAND_HOUR ||
+      HealthDataType.APPLE_MOVE_TIME => HealthCategory.fitness,
+      _ => HealthCategory.health,
+    };
+  }
+
   bool get isSleepType {
     return switch (this) {
       HealthDataType.SLEEP_AWAKE ||
