@@ -160,7 +160,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
         .toList();
     final featuredResults = visibleResults
         .where((result) => result.type.priority < 100)
-        .take(8)
+        .take(6)
         .toList();
     final totalPoints = visibleResults.fold<int>(
       0,
@@ -915,12 +915,18 @@ class HealthTypeResult {
 
   String get displayValue {
     if (type.shouldSumSamples) {
+      if (type.prefersDurationLabel) {
+        return normalizedTotalValue.durationLabel;
+      }
       return normalizedTotalValue.clean;
     }
     return latest?.primaryValue ?? '-';
   }
 
   String get unitLabel {
+    if (type.prefersDurationLabel) {
+      return '';
+    }
     if (type == HealthDataType.DISTANCE_WALKING_RUNNING &&
         latest?.unit == HealthDataUnit.METER) {
       return 'km';
@@ -965,6 +971,9 @@ extension on HealthDataPoint {
 
   String get primaryValue {
     if (value is NumericHealthValue) {
+      if (unit == HealthDataUnit.PERCENT && numericValue.abs() <= 1) {
+        return (numericValue * 100).clean;
+      }
       return numericValue.clean;
     }
 
@@ -1012,6 +1021,19 @@ extension on num {
       return toStringAsFixed(1);
     }
     return toStringAsFixed(2);
+  }
+
+  String get durationLabel {
+    final totalMinutes = round();
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+    if (hours <= 0) {
+      return '$minutes phút';
+    }
+    if (minutes == 0) {
+      return '$hours giờ';
+    }
+    return '$hours giờ $minutes phút';
   }
 }
 
@@ -1072,8 +1094,8 @@ extension on HealthDataType {
       HealthDataType.ACTIVE_ENERGY_BURNED ||
       HealthDataType.BASAL_ENERGY_BURNED ||
       HealthDataType.DISTANCE_WALKING_RUNNING ||
-      HealthDataType.FLIGHTS_CLIMBED ||
       HealthDataType.EXERCISE_TIME ||
+      HealthDataType.SLEEP_ASLEEP ||
       HealthDataType.APPLE_STAND_TIME ||
       HealthDataType.APPLE_MOVE_TIME ||
       HealthDataType.WATER ||
@@ -1083,6 +1105,13 @@ extension on HealthDataType {
       HealthDataType.DIETARY_ENERGY_CONSUMED ||
       HealthDataType.DIETARY_FATS_CONSUMED ||
       HealthDataType.DIETARY_PROTEIN_CONSUMED => true,
+      _ => false,
+    };
+  }
+
+  bool get prefersDurationLabel {
+    return switch (this) {
+      HealthDataType.SLEEP_ASLEEP => true,
       _ => false,
     };
   }
@@ -1114,12 +1143,10 @@ extension on HealthDataType {
       HealthDataType.HEART_RATE_VARIABILITY_SDNN => 'HRV',
       HealthDataType.BODY_TEMPERATURE => 'Nhiệt độ cơ thể',
       HealthDataType.WATER => 'Nước',
-      HealthDataType.FLIGHTS_CLIMBED => 'Tầng đã leo',
       HealthDataType.WALKING_SPEED => 'Tốc độ đi bộ',
       HealthDataType.MINDFULNESS => 'Chánh niệm',
       HealthDataType.NUTRITION => 'Dinh dưỡng',
       HealthDataType.BLOOD_GLUCOSE => 'Đường huyết',
-      HealthDataType.BIRTH_DATE => 'Ngày sinh',
       HealthDataType.GENDER => 'Giới tính',
       HealthDataType.BLOOD_TYPE => 'Nhóm máu',
       _ =>
@@ -1260,7 +1287,6 @@ const List<HealthDataType> _iosHealthDataTypes = [
   HealthDataType.STEPS,
   HealthDataType.WAIST_CIRCUMFERENCE,
   HealthDataType.WEIGHT,
-  HealthDataType.FLIGHTS_CLIMBED,
   HealthDataType.DISTANCE_WALKING_RUNNING,
   HealthDataType.WALKING_SPEED,
   HealthDataType.MINDFULNESS,
@@ -1284,7 +1310,6 @@ const List<HealthDataType> _iosHealthDataTypes = [
   HealthDataType.NUTRITION,
   HealthDataType.GENDER,
   HealthDataType.BLOOD_TYPE,
-  HealthDataType.BIRTH_DATE,
   HealthDataType.MENSTRUATION_FLOW,
   HealthDataType.WATER_TEMPERATURE,
   HealthDataType.UNDERWATER_DEPTH,
