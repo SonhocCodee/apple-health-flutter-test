@@ -57,7 +57,7 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
 
   bool _isLoading = false;
   bool _authorized = false;
-  int _rangeDays = 30;
+  DateTime _selectedDate = DateTime.now().dateOnly;
   DateTime? _lastUpdated;
   String? _message;
   List<HealthTypeResult> _results = [];
@@ -81,8 +81,13 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
       _message = null;
     });
 
-    final endTime = DateTime.now();
-    final startTime = _rangeStart(endTime);
+    final now = DateTime.now();
+    final startTime = _selectedDate.dateOnly;
+    final endTime = _isSameDay(_selectedDate, now)
+        ? now
+        : startTime
+              .add(const Duration(days: 1))
+              .subtract(const Duration(milliseconds: 1));
     final types = _iosHealthDataTypes
         .where(_health.isDataTypeAvailable)
         .toList();
@@ -178,17 +183,15 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
                     _HealthHeader(
                       isLoading: _isLoading,
                       authorized: _authorized,
-                      rangeDays: _rangeDays,
-                      rangeLabel: _rangeLabel(DateTime.now()),
+                      selectedDate: _selectedDate,
                       dataTypes: visibleResults.length,
                       totalPoints: totalPoints,
                       failedTypes: failedTypes,
                       lastUpdated: _lastUpdated,
                       message: _message,
-                      onRangeChanged: (days) {
-                        setState(() => _rangeDays = days);
-                        _loadHealthData();
-                      },
+                      onPreviousDay: _goToPreviousDay,
+                      onNextDay: _canGoToNextDay ? _goToNextDay : null,
+                      onPickDate: _pickDate,
                     ),
                     const SizedBox(height: 18),
                     if (_isLoading && visibleResults.isEmpty)
@@ -225,20 +228,50 @@ class _HealthDashboardScreenState extends State<HealthDashboardScreen> {
     );
   }
 
-  DateTime _rangeStart(DateTime endTime) {
-    final today = DateTime(endTime.year, endTime.month, endTime.day);
-    if (_rangeDays == 1) {
-      return today;
-    }
-    return today.subtract(Duration(days: _rangeDays - 1));
+  bool get _canGoToNextDay => !_isSameDay(_selectedDate, DateTime.now());
+
+  void _goToPreviousDay() {
+    setState(() {
+      _selectedDate = _selectedDate.subtract(const Duration(days: 1)).dateOnly;
+    });
+    _loadHealthData();
   }
 
-  String _rangeLabel(DateTime endTime) {
-    final start = _rangeStart(endTime);
-    if (_rangeDays == 1) {
-      return 'Hôm nay từ ${start.hour.twoDigits}:${start.minute.twoDigits}';
-    }
-    return '${start.shortDate} - ${endTime.shortDate}';
+  void _goToNextDay() {
+    if (!_canGoToNextDay) return;
+    setState(() {
+      _selectedDate = _selectedDate.add(const Duration(days: 1)).dateOnly;
+    });
+    _loadHealthData();
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(now.year - 10),
+      lastDate: now.dateOnly,
+      helpText: 'Chọn ngày',
+      cancelText: 'Hủy',
+      confirmText: 'Chọn',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(
+              context,
+            ).colorScheme.copyWith(primary: _healthRed),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate == null) return;
+    setState(() {
+      _selectedDate = pickedDate.dateOnly;
+    });
+    _loadHealthData();
   }
 }
 
@@ -246,26 +279,28 @@ class _HealthHeader extends StatelessWidget {
   const _HealthHeader({
     required this.isLoading,
     required this.authorized,
-    required this.rangeDays,
-    required this.rangeLabel,
+    required this.selectedDate,
     required this.dataTypes,
     required this.totalPoints,
     required this.failedTypes,
     required this.lastUpdated,
     required this.message,
-    required this.onRangeChanged,
+    required this.onPreviousDay,
+    required this.onNextDay,
+    required this.onPickDate,
   });
 
   final bool isLoading;
   final bool authorized;
-  final int rangeDays;
-  final String rangeLabel;
+  final DateTime selectedDate;
   final int dataTypes;
   final int totalPoints;
   final int failedTypes;
   final DateTime? lastUpdated;
   final String? message;
-  final ValueChanged<int> onRangeChanged;
+  final VoidCallback onPreviousDay;
+  final VoidCallback? onNextDay;
+  final VoidCallback onPickDate;
 
   @override
   Widget build(BuildContext context) {
@@ -326,14 +361,11 @@ class _HealthHeader extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            _RangeSelector(value: rangeDays, onChanged: onRangeChanged),
-            const SizedBox(height: 10),
-            Text(
-              rangeLabel,
-              style: const TextStyle(
-                color: Color(0xFF6E6E73),
-                fontWeight: FontWeight.w600,
-              ),
+            _DaySelector(
+              selectedDate: selectedDate,
+              onPreviousDay: onPreviousDay,
+              onNextDay: onNextDay,
+              onPickDate: onPickDate,
             ),
             const SizedBox(height: 16),
             Row(
@@ -359,7 +391,7 @@ class _HealthHeader extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Chỉ hiện các loại có bản ghi trong khoảng này. Các mục chưa có dữ liệu hoặc chưa được cấp quyền sẽ được ẩn.',
+              'Chỉ hiện các loại có bản ghi trong ngày đã chọn. Các mục chưa có dữ liệu hoặc chưa được cấp quyền sẽ được ẩn.',
               style: TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
             ),
             if (message != null) ...[
@@ -392,40 +424,75 @@ class _HealthHeader extends StatelessWidget {
   }
 }
 
-class _RangeSelector extends StatelessWidget {
-  const _RangeSelector({required this.value, required this.onChanged});
+class _DaySelector extends StatelessWidget {
+  const _DaySelector({
+    required this.selectedDate,
+    required this.onPreviousDay,
+    required this.onNextDay,
+    required this.onPickDate,
+  });
 
-  final int value;
-  final ValueChanged<int> onChanged;
+  final DateTime selectedDate;
+  final VoidCallback onPreviousDay;
+  final VoidCallback? onNextDay;
+  final VoidCallback onPickDate;
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<int>(
-      showSelectedIcon: false,
-      style: ButtonStyle(
-        backgroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? _healthRed
-              : const Color(0xFFF2F2F7),
-        ),
-        foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? Colors.white
-              : Colors.black87,
-        ),
-        side: const WidgetStatePropertyAll(BorderSide.none),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
+    final isToday = _isSameDay(selectedDate, DateTime.now());
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F2F7),
+        borderRadius: BorderRadius.circular(8),
       ),
-      segments: const [
-        ButtonSegment(value: 1, label: Text('Ngày')),
-        ButtonSegment(value: 7, label: Text('Tuần')),
-        ButtonSegment(value: 30, label: Text('Tháng')),
-        ButtonSegment(value: 365, label: Text('Năm')),
-      ],
-      selected: {value},
-      onSelectionChanged: (values) => onChanged(values.first),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Ngày trước',
+            onPressed: onPreviousDay,
+            icon: const Icon(Icons.chevron_left_rounded),
+          ),
+          Expanded(
+            child: TextButton.icon(
+              onPressed: onPickDate,
+              icon: const Icon(Icons.calendar_today_rounded, size: 18),
+              label: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    isToday ? 'Hôm nay' : selectedDate.weekdayLabel,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    selectedDate.shortDate,
+                    style: const TextStyle(
+                      color: Color(0xFF6E6E73),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: _healthRed,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Ngày sau',
+            onPressed: onNextDay,
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -889,6 +956,21 @@ extension on num {
 }
 
 extension on DateTime {
+  DateTime get dateOnly => DateTime(year, month, day);
+
+  String get weekdayLabel {
+    return switch (weekday) {
+      DateTime.monday => 'Thứ Hai',
+      DateTime.tuesday => 'Thứ Ba',
+      DateTime.wednesday => 'Thứ Tư',
+      DateTime.thursday => 'Thứ Năm',
+      DateTime.friday => 'Thứ Sáu',
+      DateTime.saturday => 'Thứ Bảy',
+      DateTime.sunday => 'Chủ Nhật',
+      _ => '',
+    };
+  }
+
   String get shortTime {
     final local = toLocal();
     return '${local.day.twoDigits}/${local.month.twoDigits} ${local.hour.twoDigits}:${local.minute.twoDigits}';
@@ -917,6 +999,10 @@ extension on DateTime {
 
 extension on int {
   String get twoDigits => toString().padLeft(2, '0');
+}
+
+bool _isSameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
 extension on HealthDataType {
